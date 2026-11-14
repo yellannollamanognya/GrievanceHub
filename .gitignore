@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Uploaded files
+backend/uploads/
+
+# Editor and operating system files
+.DS_Store
+.idea/
