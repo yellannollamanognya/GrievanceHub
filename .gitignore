@@ -16,7 +16,8 @@ coverage/
 npm-debug.log*
 
 # Uploaded files
-backend/uploads/
+backend/uploads/*
+!backend/uploads/.gitkeep
 
 # Editor and operating system files
 .DS_Store
