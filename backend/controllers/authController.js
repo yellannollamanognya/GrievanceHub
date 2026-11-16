@@ -3,6 +3,18 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
 
+// Generate JWT token
+const generateToken = (user) => {
+    return jwt.sign(
+        {
+            user_id: user.user_id,
+            role: user.role
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '1d' }
+    );
+};
+
 // STUDENT REGISTRATION
 const registerStudent = async (req, res) => {
     const {
@@ -15,7 +27,6 @@ const registerStudent = async (req, res) => {
         address
     } = req.body;
 
-    // 1. Validate required fields
     if (
         !name || !email || !password ||
         !roll_number || !department_id ||
@@ -27,7 +38,6 @@ const registerStudent = async (req, res) => {
         });
     }
 
-    // 2. Validate input formats
     const cleanName = String(name).trim();
     const cleanEmail = String(email).trim().toLowerCase();
     const cleanRoll = String(roll_number).trim();
@@ -36,7 +46,7 @@ const registerStudent = async (req, res) => {
 
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-    if (cleanName.length > 100 || cleanName.length === 0) {
+    if (!cleanName || cleanName.length > 100) {
         return res.status(400).json({
             success: false,
             message: 'Name must contain 1 to 100 characters'
@@ -57,7 +67,7 @@ const registerStudent = async (req, res) => {
         });
     }
 
-    if (cleanRoll.length > 40 || cleanRoll.length === 0) {
+    if (!cleanRoll || cleanRoll.length > 40) {
         return res.status(400).json({
             success: false,
             message: 'Please provide a valid roll number'
@@ -78,16 +88,12 @@ const registerStudent = async (req, res) => {
         });
     }
 
-    // 3. Get database connection
     let connection;
 
     try {
         connection = await pool.getConnection();
-
-        // 4. Start transaction
         await connection.beginTransaction();
 
-        // 5. Check whether department exists
         const [departments] = await connection.execute(
             'SELECT department_id FROM departments WHERE department_id = ?',
             [deptId]
@@ -102,10 +108,8 @@ const registerStudent = async (req, res) => {
             });
         }
 
-        // 6. Hash the password
         const passwordHash = await bcrypt.hash(password, 12);
 
-        // 7. Insert into users table
         const [userResult] = await connection.execute(
             `INSERT INTO users (name, email, password_hash, role)
              VALUES (?, ?, ?, 'STUDENT')`,
@@ -114,7 +118,6 @@ const registerStudent = async (req, res) => {
 
         const userId = userResult.insertId;
 
-        // 8. Insert into students table
         await connection.execute(
             `INSERT INTO students
              (user_id, roll_number, department_id, year_of_study, address)
@@ -128,7 +131,6 @@ const registerStudent = async (req, res) => {
             ]
         );
 
-        // 9. Save both records
         await connection.commit();
 
         return res.status(201).json({
@@ -145,7 +147,6 @@ const registerStudent = async (req, res) => {
         });
 
     } catch (error) {
-
         if (connection) {
             await connection.rollback();
         }
@@ -171,11 +172,10 @@ const registerStudent = async (req, res) => {
     }
 };
 
-// STUDENT LOGIN
-const loginStudent = async (req, res) => {
+// COMMON LOGIN - STUDENT, STAFF AND ADMIN
+const login = async (req, res) => {
     const { email, password } = req.body;
 
-    // 1. Validate input
     if (
         typeof email !== 'string' ||
         typeof password !== 'string' ||
@@ -189,11 +189,14 @@ const loginStudent = async (req, res) => {
     }
 
     try {
-        // 2. Find student by email
+        if (!process.env.JWT_SECRET) {
+            throw new Error('JWT_SECRET is not configured');
+        }
+
         const [users] = await pool.execute(
             `SELECT user_id, name, email, password_hash, role
              FROM users
-             WHERE email = ? AND role = 'STUDENT'`,
+             WHERE email = ? AND is_active = TRUE`,
             [email.trim().toLowerCase()]
         );
 
@@ -206,7 +209,15 @@ const loginStudent = async (req, res) => {
 
         const user = users[0];
 
-        // 3. Compare entered password with stored hash
+        const allowedRoles = ['STUDENT', 'STAFF', 'ADMIN'];
+
+        if (!allowedRoles.includes(user.role)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Invalid account role'
+            });
+        }
+
         const isPasswordCorrect = await bcrypt.compare(
             password,
             user.password_hash
@@ -219,17 +230,79 @@ const loginStudent = async (req, res) => {
             });
         }
 
-        // 4. Generate JWT token
-        const token = jwt.sign(
-            {
+        const token = generateToken(user);
+
+        return res.status(200).json({
+            success: true,
+            message: 'Login successful',
+            token,
+            user: {
                 user_id: user.user_id,
+                name: user.name,
+                email: user.email,
                 role: user.role
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: '1d' }
+            }
+        });
+
+    } catch (error) {
+        console.error('Common login error:', error.message);
+
+        return res.status(500).json({
+            success: false,
+            message: 'Login failed'
+        });
+    }
+};
+
+// STUDENT LOGIN
+const loginStudent = async (req, res) => {
+    const { email, password } = req.body;
+
+    if (
+        typeof email !== 'string' ||
+        typeof password !== 'string' ||
+        !email.trim() ||
+        !password
+    ) {
+        return res.status(400).json({
+            success: false,
+            message: 'Email and password are required'
+        });
+    }
+
+    try {
+        const [users] = await pool.execute(
+            `SELECT user_id, name, email, password_hash, role
+             FROM users
+             WHERE email = ?
+               AND role = 'STUDENT'
+               AND is_active = TRUE`,
+            [email.trim().toLowerCase()]
         );
 
-        // 5. Send login response
+        if (users.length === 0) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid email or password'
+            });
+        }
+
+        const user = users[0];
+
+        const isPasswordCorrect = await bcrypt.compare(
+            password,
+            user.password_hash
+        );
+
+        if (!isPasswordCorrect) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid email or password'
+            });
+        }
+
+        const token = generateToken(user);
+
         return res.status(200).json({
             success: true,
             message: 'Student login successful',
@@ -252,12 +325,10 @@ const loginStudent = async (req, res) => {
     }
 };
 
-
 // STAFF LOGIN
 const loginStaff = async (req, res) => {
     const { email, password } = req.body;
 
-    // Validate input
     if (
         typeof email !== 'string' ||
         typeof password !== 'string' ||
@@ -271,13 +342,14 @@ const loginStaff = async (req, res) => {
     }
 
     try {
-        // Find staff account
         const [users] = await pool.execute(
             `SELECT u.user_id, u.name, u.email, u.password_hash, u.role,
                     s.employee_id, s.department_id, s.designation
              FROM users u
              JOIN staff s ON u.user_id = s.user_id
-             WHERE u.email = ? AND u.role = 'STAFF'`,
+             WHERE u.email = ?
+               AND u.role = 'STAFF'
+               AND u.is_active = TRUE`,
             [email.trim().toLowerCase()]
         );
 
@@ -290,7 +362,6 @@ const loginStaff = async (req, res) => {
 
         const user = users[0];
 
-        // Verify password
         const isPasswordCorrect = await bcrypt.compare(
             password,
             user.password_hash
@@ -303,15 +374,7 @@ const loginStaff = async (req, res) => {
             });
         }
 
-        // Generate JWT
-        const token = jwt.sign(
-            {
-                user_id: user.user_id,
-                role: user.role
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: '1d' }
-        );
+        const token = generateToken(user);
 
         return res.status(200).json({
             success: true,
@@ -385,14 +448,7 @@ const loginAdmin = async (req, res) => {
             });
         }
 
-        const token = jwt.sign(
-            {
-                user_id: user.user_id,
-                role: user.role
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: '1d' }
-        );
+        const token = generateToken(user);
 
         return res.status(200).json({
             success: true,
@@ -418,6 +474,7 @@ const loginAdmin = async (req, res) => {
 
 module.exports = {
     registerStudent,
+    login,
     loginStudent,
     loginStaff,
     loginAdmin

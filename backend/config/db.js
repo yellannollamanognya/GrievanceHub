@@ -7,7 +7,13 @@ const pool = mysql.createPool({
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
-    port: process.env.DB_PORT,
+    port: Number(process.env.DB_PORT),
+
+    // TiDB Cloud requires a secure TLS connection
+    ssl: {
+        minVersion: 'TLSv1.2'
+    },
+
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
@@ -17,7 +23,7 @@ const pool = mysql.createPool({
 async function testConnection() {
     try {
         const connection = await pool.getConnection();
-        console.log('MySQL Database Connected Successfully!');
+        console.log('TiDB Cloud Database Connected Successfully!');
         connection.release();
     } catch (error) {
         console.error('Database Connection Failed:', error.message);

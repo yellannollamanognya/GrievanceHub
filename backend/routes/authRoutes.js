@@ -1,19 +1,27 @@
+
 const express = require('express');
 const router = express.Router();
 
 const {
     registerStudent,
+    login,
     loginStudent,
     loginStaff,
     loginAdmin
 } = require('../controllers/authController');
+
 const {
     verifyToken,
     authorizeRoles
 } = require('../middleware/authMiddleware');
+
 const { pool } = require('../config/db');
+
 // Student registration
 router.post('/register/student', registerStudent);
+
+// Common login - Student, Staff and Admin
+router.post('/login', login);
 
 // Student login
 router.post('/login/student', loginStudent);
@@ -23,6 +31,7 @@ router.post('/login/staff', loginStaff);
 
 // Admin login
 router.post('/login/admin', loginAdmin);
+
 // Protected student profile
 router.get('/profile', verifyToken, async (req, res) => {
     try {
@@ -43,7 +52,7 @@ router.get('/profile', verifyToken, async (req, res) => {
             });
         }
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             student: users[0]
         });
@@ -51,7 +60,7 @@ router.get('/profile', verifyToken, async (req, res) => {
     } catch (error) {
         console.error('Profile error:', error.message);
 
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: 'Unable to fetch student profile'
         });
@@ -98,6 +107,7 @@ router.get(
         }
     }
 );
+
 // Protected Admin Profile
 router.get(
     '/admin-profile',
@@ -136,4 +146,5 @@ router.get(
         }
     }
 );
+
 module.exports = router;
