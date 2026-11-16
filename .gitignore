@@ -22,3 +22,4 @@ backend/uploads/*
 # Editor and operating system files
 .DS_Store
 .idea/
+.vite/
